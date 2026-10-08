@@ -1,0 +1,536 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum RoleName {
+  ADMINISTRADOR
+  GERENTE_FINANCIERO
+  AGENTE_COMERCIAL
+  SUPERVISOR
+}
+
+enum ProjectType {
+  CASA
+  EDIFICIO
+  LOTE
+}
+
+enum ProjectStatus {
+  PLANIFICACION
+  EN_EJECUCION
+  FINALIZADO
+  SUSPENDIDO
+}
+
+enum UnitType {
+  LOCAL
+  APARTAMENTO
+  APARTAESTUDIO
+  PARQUEADERO
+  ZONA_COMUN
+}
+
+enum PropertyStatus {
+  DISPONIBLE
+  SEPARADA
+  VENDIDA
+  ENTREGADA
+}
+
+enum CostCategory {
+  TERRENO
+  CONSTRUCCION
+  ESTUDIOS
+  LICENCIAS
+  MATERIALES
+  ACABADOS
+  SERVICIOS
+  OTROS
+}
+
+enum PaymentMethod {
+  EFECTIVO
+  TRANSFERENCIA
+  CONSIGNACION
+  OTRO
+}
+
+enum AccountType {
+  BANCO
+  CAJA
+}
+
+enum ReconciliationStatus {
+  PENDIENTE
+  CONCILIADA
+  CON_DIFERENCIAS
+}
+
+enum LeadStage {
+  NUEVO_INTERESADO
+  CONTACTADO
+  POR_VISITAR
+  VISITA_PROGRAMADA
+  VISITA_REALIZADA
+  EN_NEGOCIACION
+  SEPARACION_REALIZADA
+  COMPRA_REALIZADA
+  NO_INTERESADO
+}
+
+enum InstallmentStatus {
+  PENDIENTE
+  PAGADA
+}
+
+enum MaterialCategory {
+  ESTRUCTURA
+  ACABADOS
+  INSTALACIONES
+  HERRAMIENTAS_EQUIPOS
+}
+
+enum PurchasePaymentType {
+  CONTADO
+  CREDITO
+}
+
+enum ContractType {
+  CONTRATO_LABORAL
+  PRESTACION_SERVICIOS
+  CONTRATISTA
+  OTRO
+}
+
+enum WorkerStatus {
+  ACTIVO
+  INACTIVO
+}
+
+enum AssignmentStatus {
+  ACTIVA
+  FINALIZADA
+}
+
+// ---------- RF01: usuarios y roles ----------
+
+model User {
+  id           String   @id @default(uuid())
+  fullName     String
+  email        String   @unique
+  passwordHash String
+  role         RoleName
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  projectsManaged  Project[]         @relation("ProjectManager")
+  leadsFollowed    Lead[]
+  interactions     LeadInteraction[]
+
+  @@map("users")
+}
+
+// ---------- RF02: proyectos y propiedades ----------
+
+model Project {
+  id          String        @id @default(uuid())
+  name        String
+  location    String
+  description String?
+  type        ProjectType
+  status      ProjectStatus @default(PLANIFICACION)
+  lotArea     Decimal       @db.Decimal(12, 2)
+  managerId   String
+  manager     User          @relation("ProjectManager", fields: [managerId], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  houseDetail    HouseDetail?
+  buildingDetail BuildingDetail?
+  lotDetail      LotDetail?
+
+  projectedUnits  ProjectedUnit[]
+  properties      Property[]
+  investments     Investment[]
+  incomes         Income[]
+  expenses        Expense[]
+  plannedExpenses PlannedExpense[]
+  reconciliations BankReconciliation[]
+  leads           Lead[]
+  purchases       PropertyPurchase[]
+  materialPurchases MaterialPurchase[]
+  assignments     LaborAssignment[]
+  laborPayments   LaborPayment[]
+
+  @@map("projects")
+}
+
+model HouseDetail {
+  id        String  @id @default(uuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  floors    Int
+  bedrooms  Int
+  bathrooms Int
+  builtArea Decimal @db.Decimal(12, 2)
+
+  @@map("house_details")
+}
+
+model BuildingDetail {
+  id              String  @id @default(uuid())
+  projectId       String  @unique
+  project         Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  floors          Int
+  apartments      Int
+  commercialUnits Int
+  commonArea      Decimal @db.Decimal(12, 2)
+  builtArea       Decimal @db.Decimal(12, 2)
+
+  @@map("building_details")
+}
+
+model LotDetail {
+  id             String  @id @default(uuid())
+  projectId      String  @unique
+  project        Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  hasWater       Boolean @default(false)
+  hasSewage      Boolean @default(false)
+  hasElectricity Boolean @default(false)
+  otherServices  String?
+
+  @@map("lot_details")
+}
+
+model ProjectedUnit {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  unitType  UnitType
+  quantity  Int
+
+  @@unique([projectId, unitType])
+  @@map("projected_units")
+}
+
+model Property {
+  id        String         @id @default(uuid())
+  code      String         @unique
+  projectId String
+  project   Project        @relation(fields: [projectId], references: [id])
+  type      UnitType
+  area      Decimal        @db.Decimal(12, 2)
+  price     Decimal        @db.Decimal(14, 2)
+  features  String?
+  status    PropertyStatus @default(DISPONIBLE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  leads    Lead[]
+  incomes  Income[]
+  purchase PropertyPurchase?
+
+  @@map("properties")
+}
+
+// ---------- RF04, RF05, RF06: finanzas ----------
+
+model Investment {
+  id            String       @id @default(uuid())
+  projectId     String
+  project       Project      @relation(fields: [projectId], references: [id])
+  concept       String
+  category      CostCategory
+  description   String?
+  estimatedCost Decimal      @db.Decimal(14, 2)
+  createdAt     DateTime     @default(now())
+
+  @@map("investments")
+}
+
+model Income {
+  id               String              @id @default(uuid())
+  projectId        String
+  project          Project             @relation(fields: [projectId], references: [id])
+  clientId         String?
+  client           Client?             @relation(fields: [clientId], references: [id])
+  propertyId       String?
+  property         Property?           @relation(fields: [propertyId], references: [id])
+  installmentId    String?             @unique
+  installment      Installment?        @relation(fields: [installmentId], references: [id])
+  reconciliationId String?
+  reconciliation   BankReconciliation? @relation(fields: [reconciliationId], references: [id])
+  concept          String
+  amount           Decimal             @db.Decimal(14, 2)
+  paymentMethod    PaymentMethod
+  date             DateTime
+
+  @@map("incomes")
+}
+
+model Expense {
+  id               String              @id @default(uuid())
+  projectId        String
+  project          Project             @relation(fields: [projectId], references: [id])
+  reconciliationId String?
+  reconciliation   BankReconciliation? @relation(fields: [reconciliationId], references: [id])
+  category         CostCategory
+  concept          String
+  supplier         String?
+  amountPaid       Decimal             @db.Decimal(14, 2)
+  paymentDate      DateTime
+
+  @@map("expenses")
+}
+
+model PlannedExpense {
+  id          String       @id @default(uuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id])
+  category    CostCategory
+  concept     String
+  amount      Decimal      @db.Decimal(14, 2)
+  plannedDate DateTime
+
+  @@map("planned_expenses")
+}
+
+model BankReconciliation {
+  id            String               @id @default(uuid())
+  projectId     String
+  project       Project              @relation(fields: [projectId], references: [id])
+  accountType   AccountType
+  accountName   String?
+  periodStart   DateTime
+  periodEnd     DateTime
+  bankBalance   Decimal              @db.Decimal(14, 2)
+  systemBalance Decimal              @db.Decimal(14, 2)
+  discrepancy   Decimal              @db.Decimal(14, 2)
+  status        ReconciliationStatus @default(PENDIENTE)
+  reconciledAt  DateTime             @default(now())
+  notes         String?
+
+  incomes  Income[]
+  expenses Expense[]
+
+  @@map("bank_reconciliations")
+}
+
+// ---------- RF07, RF08, RF09, RF10: clientes, ventas y cartera ----------
+
+model Client {
+  id              String   @id @default(uuid())
+  fullName        String
+  idType          String
+  idNumber        String   @unique
+  phone           String?
+  email           String?
+  address         String?
+  incomeType      String?
+  monthlyIncome   Decimal? @db.Decimal(14, 2)
+  paymentCapacity Decimal? @db.Decimal(14, 2)
+  references      String?
+  additionalInfo  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  leads     Lead[]
+  purchases PropertyPurchase[]
+  incomes   Income[]
+
+  @@map("clients")
+}
+
+model Lead {
+  id               String    @id @default(uuid())
+  clientId         String
+  client           Client    @relation(fields: [clientId], references: [id])
+  projectId        String
+  project          Project   @relation(fields: [projectId], references: [id])
+  propertyId       String?
+  property         Property? @relation(fields: [propertyId], references: [id])
+  interestedType   UnitType?
+  stage            LeadStage @default(NUEVO_INTERESADO)
+  contactDate      DateTime  @default(now())
+  responsibleId    String
+  responsible      User      @relation(fields: [responsibleId], references: [id])
+  observations     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  interactions LeadInteraction[]
+
+  @@map("leads")
+}
+
+model LeadInteraction {
+  id             String    @id @default(uuid())
+  leadId         String
+  lead           Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  date           DateTime  @default(now())
+  notes          String
+  nextAction     String?
+  nextActionDate DateTime?
+
+  @@map("lead_interactions")
+}
+
+model PropertyPurchase {
+  id                String   @id @default(uuid())
+  clientId          String
+  client            Client   @relation(fields: [clientId], references: [id])
+  projectId         String
+  project           Project  @relation(fields: [projectId], references: [id])
+  propertyId        String   @unique
+  property          Property @relation(fields: [propertyId], references: [id])
+  purchaseDate      DateTime
+  value             Decimal  @db.Decimal(14, 2)
+  negotiationStatus String
+
+  paymentPlan PaymentPlan?
+
+  @@map("property_purchases")
+}
+
+model PaymentPlan {
+  id         String           @id @default(uuid())
+  purchaseId String           @unique
+  purchase   PropertyPurchase @relation(fields: [purchaseId], references: [id])
+  createdAt  DateTime         @default(now())
+
+  installments Installment[]
+
+  @@map("payment_plans")
+}
+
+model Installment {
+  id             String            @id @default(uuid())
+  paymentPlanId  String
+  paymentPlan    PaymentPlan       @relation(fields: [paymentPlanId], references: [id])
+  number         Int
+  isSeparation   Boolean           @default(false)
+  dueDate        DateTime
+  scheduledValue Decimal           @db.Decimal(14, 2)
+  status         InstallmentStatus @default(PENDIENTE)
+  paidDate       DateTime?
+  paidAmount     Decimal?          @db.Decimal(14, 2)
+  paymentMethod  PaymentMethod?
+
+  income Income?
+
+  @@unique([paymentPlanId, number])
+  @@map("installments")
+}
+
+// ---------- RF11: materiales ----------
+
+model Material {
+  id       String           @id @default(uuid())
+  name     String
+  category MaterialCategory
+  stock    Decimal          @default(0) @db.Decimal(12, 2)
+  minStock Decimal          @default(0) @db.Decimal(12, 2)
+
+  purchases MaterialPurchase[]
+
+  @@map("materials")
+}
+
+model MaterialPurchase {
+  id               String              @id @default(uuid())
+  projectId        String
+  project          Project             @relation(fields: [projectId], references: [id])
+  materialId       String
+  material         Material            @relation(fields: [materialId], references: [id])
+  supplier         String
+  orderedQuantity  Decimal             @db.Decimal(12, 2)
+  receivedQuantity Decimal             @db.Decimal(12, 2)
+  totalValue       Decimal             @db.Decimal(14, 2)
+  purchaseDate     DateTime
+  paymentType      PurchasePaymentType @default(CONTADO)
+
+  payments MaterialPayment[]
+  returns  MaterialReturn[]
+
+  @@map("material_purchases")
+}
+
+model MaterialPayment {
+  id         String           @id @default(uuid())
+  purchaseId String
+  purchase   MaterialPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  date       DateTime
+  amount     Decimal          @db.Decimal(14, 2)
+  method     PaymentMethod
+
+  @@map("material_payments")
+}
+
+model MaterialReturn {
+  id         String           @id @default(uuid())
+  purchaseId String
+  purchase   MaterialPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  date       DateTime
+  quantity   Decimal          @db.Decimal(12, 2)
+  value      Decimal          @db.Decimal(14, 2)
+  reason     String?
+
+  @@map("material_returns")
+}
+
+// ---------- RF12: recursos humanos ----------
+
+model Employee {
+  id           String       @id @default(uuid())
+  fullName     String
+  idType       String
+  idNumber     String       @unique
+  phone        String?
+  email        String?
+  jobRole      String
+  contractType ContractType
+  status       WorkerStatus @default(ACTIVO)
+
+  assignments LaborAssignment[]
+  payments    LaborPayment[]
+
+  @@map("employees")
+}
+
+model LaborAssignment {
+  id            String           @id @default(uuid())
+  employeeId    String
+  employee      Employee         @relation(fields: [employeeId], references: [id])
+  projectId     String
+  project       Project          @relation(fields: [projectId], references: [id])
+  roleInProject String
+  startDate     DateTime
+  endDate       DateTime?
+  status        AssignmentStatus @default(ACTIVA)
+
+  @@map("labor_assignments")
+}
+
+model LaborPayment {
+  id          String   @id @default(uuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  periodStart DateTime
+  periodEnd   DateTime
+  concept     String
+  amount      Decimal  @db.Decimal(14, 2)
+
+  @@map("labor_payments")
+}
